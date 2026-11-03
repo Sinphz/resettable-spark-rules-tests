@@ -19,10 +19,20 @@ function isolationGuard() {
   assert.equal(process.env.FIREBASE_EMULATOR_HUB, '127.0.0.1:4400', 'Only the local emulator hub is allowed');
   assert.equal(process.env.GCLOUD_PROJECT, PROJECT, 'Only the fictitious demo project is allowed');
   assert.equal(process.env.GOOGLE_CLOUD_PROJECT, PROJECT, 'Only the fictitious demo project is allowed');
-  for (const key of ['FIREBASE_TOKEN', 'FIREBASE_CONFIG', 'GOOGLE_APPLICATION_CREDENTIALS',
+  for (const key of ['FIREBASE_TOKEN', 'GOOGLE_APPLICATION_CREDENTIALS',
     'GOOGLE_OAUTH_ACCESS_TOKEN', 'CLOUDSDK_AUTH_ACCESS_TOKEN', 'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE',
     'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'WEB_HOST']) {
     assert(!process.env[key], `Unexpected credentials/configuration in ${key}; refusing to run`);
+  }
+  // firebase emulators:exec injects this exact metadata object when the parent
+  // sets GCLOUD_PROJECT and leaves FIREBASE_CONFIG empty. Reject other projects,
+  // credentials, extra service config, or any unexpected shape.
+  if (process.env.FIREBASE_CONFIG) {
+    assert.deepEqual(JSON.parse(process.env.FIREBASE_CONFIG), {
+      projectId: PROJECT,
+      storageBucket: `${PROJECT}.appspot.com`,
+      databaseURL: `https://${PROJECT}.firebaseio.com`
+    }, 'Unexpected Firebase CLI configuration; refusing to run');
   }
   for (const key of ['FIREBASE_PROJECT', 'FIREBASE_PROJECT_ID', 'CLOUDSDK_CORE_PROJECT']) {
     assert(!process.env[key] || process.env[key] === PROJECT, `Unexpected project in ${key}`);
