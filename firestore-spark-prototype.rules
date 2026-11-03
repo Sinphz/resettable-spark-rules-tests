@@ -70,7 +70,7 @@ service cloud.firestore {
           : old.protocol == c.protocol && old.uid == c.uid && old.epochId == c.epochId
             && old.cloudRevision <= c.expectedCloudRevision && c.sequence == old.sequence + 1
             && !(c.operationId in old.operationIds)
-            && next.operationIds == old.operationIds + [c.operationId]);
+            && next.operationIds == old.operationIds.concat([c.operationId]));
     }
     function headWrite(uid) {
       let h = request.resource.data;
