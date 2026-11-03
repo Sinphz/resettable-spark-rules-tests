@@ -11,6 +11,7 @@ const PORT = 8080;
 const PROTOCOL = 'resettable-spark-v1';
 const OWNER = 'rules_owner_A';
 const OTHER = 'rules_owner_B';
+const CONFIG_PATH = path.resolve(__dirname, '../../firebase.json');
 const RULES_PATH = path.resolve(__dirname, '../../firestore-spark-prototype.rules');
 function isolationGuard() {
   assert.equal(process.env.RESETTABLE_SPARK_EMULATOR_TEST, '1', 'Explicit emulator-test opt-in is required');
@@ -27,9 +28,9 @@ function isolationGuard() {
     assert(!process.env[key] || process.env[key] === PROJECT, `Unexpected project in ${key}`);
   }
   assert(!process.env.FIRESTORE_EMULATOR_HOST_PATH || process.env.FIRESTORE_EMULATOR_HOST_PATH === `${HOST}:${PORT}`);
-  const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'firebase.json'), 'utf8'));
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   assert.deepEqual(config, {
-    firestore: { rules: '../../firestore-spark-prototype.rules' },
+    firestore: { rules: 'firestore-spark-prototype.rules' },
     emulators: { firestore: { host: HOST, port: PORT }, hub: { host: HOST, port: 4400 },
       logging: { host: HOST, port: 4500 }, ui: { enabled: false }, singleProjectMode: true }
   }, 'The isolated emulator configuration must not enable other services or hosts');

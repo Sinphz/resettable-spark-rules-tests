@@ -1,6 +1,6 @@
 {
   "firestore": {
-    "rules": "../../firestore-spark-prototype.rules"
+    "rules": "firestore-spark-prototype.rules"
   },
   "emulators": {
     "firestore": {
