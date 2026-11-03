@@ -35,8 +35,8 @@ jobs:
       JAVA_TOOL_OPTIONS: -Xms128m -Xmx1024m
       # Fresh CLI config/cache on the runner; do not inherit an authenticated CLI
       # profile. No caches/artifacts are uploaded by this workflow.
-      XDG_CONFIG_HOME: ${{ runner.temp }}/resettable-spark-config
-      FIREBASE_EMULATORS_PATH: ${{ runner.temp }}/resettable-spark-emulators
+      XDG_CONFIG_HOME: /tmp/resettable-spark-config
+      FIREBASE_EMULATORS_PATH: /tmp/resettable-spark-emulators
     steps:
       - name: Check out reviewed test revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
