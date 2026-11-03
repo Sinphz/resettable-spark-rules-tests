@@ -1,0 +1,122 @@
+// DRAFT ONLY. Not configured, compiled, emulator-tested or deployed.
+// Standalone sync namespace: NOT a replacement for existing manual-backup rules.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owns(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.firebase.sign_in_provider in ['google.com', 'password'];
+    }
+    function id(v) {
+      return v is string && v.matches('^[A-Za-z0-9_-]{1,64}$')
+        && !(v in ['__proto__', 'constructor', 'prototype']);
+    }
+    function protocol(d, uid, epoch) {
+      return d.protocol == 'resettable-spark-v1' && d.uid == uid
+        && uid.matches('^[A-Za-z0-9_-]{1,128}$') && d.epochId == epoch && id(epoch);
+    }
+    function payload(v) {
+      // Printable ASCII makes the character bound a byte bound for this field.
+      // JSON contents and Resettable commands are NOT parsed by these Rules.
+      return v is string && v.size() > 0 && v.size() <= 32768 && v.matches('^[ -~]+$');
+    }
+    function headPath(uid) {
+      return /databases/$(database)/documents/users/$(uid)/syncSparkV1/head;
+    }
+    function cursorPath(uid, epoch) {
+      return /databases/$(database)/documents/users/$(uid)/syncSparkV1/head/epochs/$(epoch);
+    }
+    function commitPath(uid, epoch, sub) {
+      return /databases/$(database)/documents/users/$(uid)/syncSparkV1/head/epochs/$(epoch)/commits/$(sub);
+    }
+    function validCommit(c, uid, epoch, sub) {
+      return c.keys().hasAll(['protocol','uid','epochId','submissionId','operationId','sequence',
+          'expectedCloudRevision','expectedBaselineId','localRevision','payloadJson','cloudRevision','baselineId','committedAt'])
+        && c.keys().hasOnly(['protocol','uid','epochId','submissionId','operationId','sequence',
+          'expectedCloudRevision','expectedBaselineId','localRevision','payloadJson','cloudRevision','baselineId','committedAt'])
+        && protocol(c, uid, epoch) && c.submissionId == sub && id(sub) && id(c.operationId)
+        && c.sequence is int && c.sequence >= 1 && c.sequence <= 128
+        && c.localRevision is int && c.localRevision >= 1 && c.localRevision < 9007199254740991
+        && c.expectedCloudRevision is int && c.expectedCloudRevision >= 0 && c.expectedCloudRevision < 128
+        && ((c.expectedCloudRevision == 0 && c.expectedBaselineId == null)
+          || (c.expectedCloudRevision > 0 && c.expectedBaselineId is string
+            && c.expectedBaselineId.matches('^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$')))
+        && c.cloudRevision is int && c.cloudRevision == c.expectedCloudRevision + 1
+        && c.baselineId == epoch + ':' + sub && payload(c.payloadJson)
+        && c.committedAt is timestamp && c.committedAt == request.time;
+    }
+    function headPair(old, next, c, newEpoch) {
+      return next.keys().hasAll(['protocol','uid','revision','baselineId','epochId','submissionId','sequence','payloadJson','epochCount','committedAt'])
+        && next.keys().hasOnly(['protocol','uid','revision','baselineId','epochId','submissionId','sequence','payloadJson','epochCount','committedAt'])
+        && protocol(next, c.uid, c.epochId) && next.revision == c.cloudRevision
+        && next.baselineId == c.baselineId && next.submissionId == c.submissionId
+        && next.sequence == c.sequence && next.payloadJson == c.payloadJson
+        && next.committedAt == c.committedAt && next.epochCount is int
+        && next.epochCount >= 1 && next.epochCount <= 8
+        && (old == null
+          ? c.expectedCloudRevision == 0 && c.expectedBaselineId == null && newEpoch && next.epochCount == 1
+          : old.protocol == c.protocol && old.uid == c.uid
+            && old.revision == c.expectedCloudRevision && old.baselineId == c.expectedBaselineId
+            && next.epochCount == old.epochCount + (newEpoch ? 1 : 0));
+    }
+    function cursorPair(old, next, c) {
+      return next.keys().hasAll(['protocol','uid','epochId','sequence','operationIds','lastSubmissionId','cloudRevision'])
+        && next.keys().hasOnly(['protocol','uid','epochId','sequence','operationIds','lastSubmissionId','cloudRevision'])
+        && protocol(next, c.uid, c.epochId) && next.sequence == c.sequence
+        && next.lastSubmissionId == c.submissionId && next.cloudRevision == c.cloudRevision
+        && next.operationIds is list && next.operationIds.size() == next.sequence
+        && (old == null
+          ? c.sequence == 1 && next.operationIds == [c.operationId]
+          : old.protocol == c.protocol && old.uid == c.uid && old.epochId == c.epochId
+            && old.cloudRevision <= c.expectedCloudRevision && c.sequence == old.sequence + 1
+            && !(c.operationId in old.operationIds)
+            && next.operationIds == old.operationIds + [c.operationId]);
+    }
+    function headWrite(uid) {
+      let h = request.resource.data;
+      let cp = cursorPath(uid, h.epochId);
+      let mp = commitPath(uid, h.epochId, h.submissionId);
+      let c = getAfter(mp).data;
+      let oldCursor = exists(cp) ? get(cp).data : null;
+      return !exists(mp) && validCommit(c, uid, h.epochId, h.submissionId)
+        && headPair(request.method == 'create' ? null : resource.data, h, c, oldCursor == null)
+        && cursorPair(oldCursor, getAfter(cp).data, c);
+    }
+    function cursorWrite(uid, epoch) {
+      let next = request.resource.data;
+      let hp = headPath(uid);
+      let mp = commitPath(uid, epoch, next.lastSubmissionId);
+      let oldHead = exists(hp) ? get(hp).data : null;
+      let c = getAfter(mp).data;
+      return !exists(mp) && validCommit(c, uid, epoch, next.lastSubmissionId)
+        && headPair(oldHead, getAfter(hp).data, c, request.method == 'create')
+        && cursorPair(request.method == 'create' ? null : resource.data, next, c);
+    }
+    function commitWrite(uid, epoch, sub) {
+      let hp = headPath(uid);
+      let cp = cursorPath(uid, epoch);
+      let oldHead = exists(hp) ? get(hp).data : null;
+      let oldCursor = exists(cp) ? get(cp).data : null;
+      let c = request.resource.data;
+      return validCommit(c, uid, epoch, sub)
+        && headPair(oldHead, getAfter(hp).data, c, oldCursor == null)
+        && cursorPair(oldCursor, getAfter(cp).data, c);
+    }
+    match /users/{uid}/syncSparkV1/head {
+      allow get: if owns(uid);
+      allow create, update: if owns(uid) && headWrite(uid);
+      allow list, delete: if false;
+      match /epochs/{epoch} {
+        allow get: if owns(uid);
+        allow create, update: if owns(uid) && cursorWrite(uid, epoch);
+        allow list, delete: if false;
+        match /commits/{sub} {
+          allow get: if owns(uid);
+          allow create: if owns(uid) && commitWrite(uid, epoch, sub);
+          allow list, update, delete: if false;
+        }
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
